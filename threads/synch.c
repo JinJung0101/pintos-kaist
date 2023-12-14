@@ -66,7 +66,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered(&sema->waiters, &thread_current()->elem, priority_more, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -109,10 +109,14 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters))
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
-					struct thread, elem));
+	if (!list_empty (&sema->waiters)) {
+		list_sort(&sema->waiters, priority_more, NULL);
+		thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
+	}
 	sema->value++;
+ 
+   test_max_priority();
+   
 	intr_set_level (old_level);
 }
 
@@ -174,6 +178,20 @@ lock_init (struct lock *lock) {
 	sema_init (&lock->semaphore, 1);
 }
 
+
+/* inversion */
+bool
+donations_priority_more (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) { 
+	struct thread *a = list_entry (a_, struct thread, donations_elem);
+	struct thread *b = list_entry (b_, struct thread, donations_elem);
+
+	return a->priority > b->priority;
+}
+
+
+
+
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -188,8 +206,22 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
-	sema_down (&lock->semaphore);
-	lock->holder = thread_current ();
+   struct thread *cur = thread_current();
+
+   if (lock->holder != NULL) {
+      // put signal that this thread is waiting for the lock
+      cur->waiting_lock = lock;
+      list_insert_ordered(&lock->holder->donations, &cur->donations_elem, donations_priority_more, NULL);
+      // nested donation of priority
+      if (!thread_mlfqs) {
+         donate_priority();
+      }
+   }
+
+   sema_down (&lock->semaphore);
+   cur->waiting_lock = NULL;
+
+   lock->holder = thread_current();
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -221,9 +253,14 @@ void
 lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
+   
+   if (!thread_mlfqs) {
+      remove_with_lock(lock);
+      refresh_priority();
+   }
 
-	lock->holder = NULL;
-	sema_up (&lock->semaphore);
+   lock->holder = NULL;
+   sema_up (&lock->semaphore);
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -250,6 +287,17 @@ cond_init (struct condition *cond) {
 	ASSERT (cond != NULL);
 
 	list_init (&cond->waiters);
+}
+
+bool
+sema_priority_more (const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED) { 
+	const struct semaphore_elem *a = list_entry (a_, struct semaphore_elem, elem);
+	const struct semaphore_elem *b = list_entry (b_, struct semaphore_elem, elem);
+
+	const struct list *waiter_a = &(a->semaphore.waiters);
+	const struct list *waiter_b = &(b->semaphore.waiters);
+
+	return priority_more(list_begin(waiter_a), list_begin(waiter_b), NULL);
 }
 
 /* Atomically releases LOCK and waits for COND to be signaled by
@@ -282,7 +330,7 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	sema_init (&waiter.semaphore, 0);
-	list_push_back (&cond->waiters, &waiter.elem);
+   list_insert_ordered(&cond->waiters, &waiter.elem, sema_priority_more, NULL);
 	lock_release (lock);
 	sema_down (&waiter.semaphore);
 	lock_acquire (lock);
@@ -302,9 +350,10 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
 
-	if (!list_empty (&cond->waiters))
-		sema_up (&list_entry (list_pop_front (&cond->waiters),
-					struct semaphore_elem, elem)->semaphore);
+	if (!list_empty (&cond->waiters)) {
+		list_sort(&cond->waiters, sema_priority_more, NULL);
+		sema_up (&list_entry (list_pop_front (&cond->waiters), struct semaphore_elem, elem)->semaphore);
+	}
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
