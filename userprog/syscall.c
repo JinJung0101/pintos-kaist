@@ -203,7 +203,7 @@ unsigned tell (int fd) {
 void close (int fd) {
 	struct thread *t = thread_current();
 	struct file **fdt = t->fd_table;
-	if (fd < 0 || fd >= 128) {
+	if (fd < 0 || fd >= MAX_FILE) {
 		return;
 	}
 	if (fdt[fd] == NULL) {
