@@ -48,7 +48,7 @@ struct page {
 	struct frame *frame;   /* Back reference for frame */
 
 	/* Your implementation */
-	struct hash_elem page_hash_elem;
+	struct hash_elem hash_elem;
 
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
@@ -56,9 +56,9 @@ struct page {
 		struct uninit_page uninit;
 		struct anon_page anon;
 		struct file_page file;
-#ifdef EFILESYS
+	#ifdef EFILESYS
 		struct page_cache page_cache;
-#endif
+	#endif
 	};
 };
 
@@ -66,6 +66,7 @@ struct page {
 struct frame {
 	void *kva;
 	struct page *page;
+	struct list_elem frame_elem;
 };
 
 /* The function table for page operations.
@@ -92,6 +93,11 @@ struct supplemental_page_table {
 };
 
 #include "threads/thread.h"
+
+/* for spt*/
+unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
+bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+/* -------*/
 
 void supplemental_page_table_init (struct supplemental_page_table *spt);
 bool supplemental_page_table_copy (struct supplemental_page_table *dst,
