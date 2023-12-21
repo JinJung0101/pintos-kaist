@@ -4,8 +4,8 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 #include "threads/vaddr.h"
-#include "userprog/process.h"
 #include "threads/mmu.h"
+#include "include/lib/string.h"
 
 /* for spt*/
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
@@ -15,8 +15,6 @@ bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *au
 struct list frame_table;
 struct list_elem *clock_ref;
 struct lock frame_table_lock;
-
-static bool install_page (void *upage, void *kpage, bool writable);
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -284,15 +282,13 @@ vm_do_claim_page (struct page *page) {
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-	// (pml4_set_page(cur->pml4, page->va, frame->kva, page->writable))
-	// (install_page(page->va, frame->kva, page->writable))
-	// pml4_get_page(cur->pml4, page->va) == NULL &&
 	struct thread *cur = thread_current();
-	if (pml4_get_page(cur->pml4, page->va) != NULL) {
+	if (install_page(page->va, frame->kva, page->writable)) {
+		return swap_in (page, frame->kva);
+	}
+	else {
 		return false;
 	}
-	pml4_set_page(cur->pml4, page->va, frame->kva, page->writable);
-	return swap_in(page, frame->kva);
 }
 
 /* Returns a hash value for page p. */
@@ -321,7 +317,34 @@ supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
-			
+	struct hash_iterator i;
+
+	hash_first(&i, &src->spt_hash);
+	while (hash_next(&i)) {
+		struct page *parent_page = hash_entry (hash_cur (&i), struct page, hash_elem);
+		enum vm_type type = page_get_type(parent_page);
+		void *upage = parent_page->va;
+		bool writable = parent_page->writable;
+		vm_initializer *init = parent_page->uninit.init;
+		void *aux = parent_page->uninit.aux;
+
+		if (parent_page->operations->type == VM_UNINIT) {
+			if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux)) {
+				return false;
+			}
+		}
+		else {
+			if (!vm_alloc_page(type, upage, writable)) {
+				return false;
+			}
+			if (!vm_claim_page(upage)) {
+				return false;
+			}
+			struct page *child_page = spt_find_page(dst, upage);
+			memcpy(child_page->frame->kva, parent_page->va, PGSIZE);
+		}
+	}
+	return true;
 }
 
 /* Free the resource hold by the supplemental page table */
@@ -329,4 +352,5 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	
 }

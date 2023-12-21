@@ -92,6 +92,7 @@ struct supplemental_page_table {
 };
 
 #include "threads/thread.h"
+#include "include/userprog/process.h"
 
 void supplemental_page_table_init (struct supplemental_page_table *spt);
 bool supplemental_page_table_copy (struct supplemental_page_table *dst,

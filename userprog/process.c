@@ -652,7 +652,9 @@ setup_stack (struct intr_frame *if_) {
  * with palloc_get_page().
  * Returns true on success, false if UPAGE is already mapped or
  * if memory allocation fails. */
-static bool
+
+#else
+bool
 install_page (void *upage, void *kpage, bool writable) {
 	struct thread *t = thread_current ();
 
@@ -661,7 +663,6 @@ install_page (void *upage, void *kpage, bool writable) {
 	return (pml4_get_page (t->pml4, upage) == NULL
 			&& pml4_set_page (t->pml4, upage, kpage, writable));
 }
-#else
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
