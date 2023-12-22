@@ -10,6 +10,7 @@
 /* for spt*/
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+void page_kill (struct hash_elem *e, void *aux);
 /* -------*/
 
 struct list frame_table;
@@ -307,6 +308,13 @@ page_less (const struct hash_elem *a_,
   return a->va < b->va;
 }
 
+void
+page_kill (struct hash_elem *e, void *aux) {
+	struct page *page = hash_entry(e, struct page, hash_elem);
+	destroy(page);
+	free(page);
+}
+
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
@@ -341,7 +349,7 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 				return false;
 			}
 			struct page *child_page = spt_find_page(dst, upage);
-			memcpy(child_page->frame->kva, parent_page->va, PGSIZE);
+			memcpy(child_page->frame->kva, parent_page->frame->kva, PGSIZE);
 		}
 	}
 	return true;
@@ -352,5 +360,7 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
-	
+	hash_clear(&spt->spt_hash, page_kill);
 }
+
+

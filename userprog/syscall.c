@@ -10,6 +10,7 @@
 #include "intrinsic.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "vm/vm.h"
 #define MAX_FILE 128
 
 void syscall_entry (void);
@@ -46,11 +47,22 @@ syscall_init (void) {
 	lock_init(&file_lock);
 }
 
-void check_address(void *addr) {
-	struct thread *t = thread_current();
-	if (!is_user_vaddr(addr) || addr == NULL || pml4_get_page(t->pml4 , addr) == NULL) {
+// void check_address(void *addr) {
+// 	struct thread *t = thread_current();
+// 	if (!is_user_vaddr(addr) || addr == NULL || pml4_get_page(t->pml4 , addr) == NULL) {
+// 		exit(-1);
+// 	}
+// }
+
+/* Project3  */
+void * check_address(void * addr) {
+	if (!is_user_vaddr(addr) || addr == NULL) {
 		exit(-1);
 	}
+	// struct page *page = spt_find_page(&thread_current()->spt, addr);
+	// if (page == NULL) {
+	// 	exit(-1);
+	// }
 }
 
 int add_file_to_fd_table (struct file *file) {
