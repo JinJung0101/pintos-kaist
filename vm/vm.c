@@ -106,7 +106,6 @@ spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 
 	e = hash_find (&spt->spt_hash, &page->hash_elem);
 	free(page);
-
 	return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
 
@@ -236,8 +235,8 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		if (rsp_stack-8 <= addr && USER_STACK-(1 << 20) <= addr && addr <= USER_STACK) {
 			vm_stack_growth(pg_round_down(addr));
 		}
-		page = spt_find_page(spt, addr);
 
+		page = spt_find_page(spt, addr);
 		if (page == NULL) {
 			return false;
 		}
@@ -266,6 +265,7 @@ bool
 vm_claim_page (void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function */
+
 	page = spt_find_page(&thread_current()->spt, va);
 	if (page == NULL) {
 		return false;
@@ -326,20 +326,31 @@ bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
 	struct hash_iterator i;
-
 	hash_first(&i, &src->spt_hash);
+	
 	while (hash_next(&i)) {
 		struct page *parent_page = hash_entry (hash_cur (&i), struct page, hash_elem);
 		enum vm_type type = page_get_type(parent_page);
 		void *upage = parent_page->va;
 		bool writable = parent_page->writable;
-		vm_initializer *init = parent_page->uninit.init;
-		void *aux = parent_page->uninit.aux;
 
 		if (parent_page->operations->type == VM_UNINIT) {
+			vm_initializer *init = parent_page->uninit.init;
+			void *aux = parent_page->uninit.aux;
+			struct segment *file_loader = (struct segment *)aux;
+            struct segment *new_file_loader = malloc(sizeof(struct segment));
+            memcpy(new_file_loader, aux, sizeof(struct segment));
+            new_file_loader->file = file_duplicate(file_loader->file);
 			if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux)) {
+				free(new_file_loader);
 				return false;
 			}
+
+			if (!vm_claim_page(upage)) {
+				free(new_file_loader);
+				return false;
+			}
+			free(new_file_loader);
 		}
 		else {
 			if (!vm_alloc_page(type, upage, writable)) {
@@ -362,5 +373,4 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	 * TODO: writeback all the modified contents to the storage. */
 	hash_clear(&spt->spt_hash, page_kill);
 }
-
 

@@ -169,8 +169,10 @@ __do_fork (void *aux) {
 	process_activate (current);
 #ifdef VM
 	supplemental_page_table_init (&current->spt);
-	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
+	if (!supplemental_page_table_copy (&current->spt, &parent->spt)){
 		goto error;
+	}
+		
 #else
 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
 		goto error;
@@ -277,10 +279,9 @@ process_wait (tid_t child_tid) {
 	if (!(child = get_child_thread(child_tid))) {
 		return -1;
 	}
-
 	sema_down (&child->wait_sema);
-	list_remove (&child->child_elem);
 	int exit_status = child->exit_status;
+	list_remove (&child->child_elem);
 	sema_up (&child->exit_sema);
 	return exit_status;
 }
@@ -652,8 +653,20 @@ setup_stack (struct intr_frame *if_) {
  * with palloc_get_page().
  * Returns true on success, false if UPAGE is already mapped or
  * if memory allocation fails. */
+static bool
+install_page (void *upage, void *kpage, bool writable) {
+	struct thread *t = thread_current ();
 
+	/* Verify that there's not already a page at that virtual
+	 * address, then map our page there. */
+	return (pml4_get_page (t->pml4, upage) == NULL
+			&& pml4_set_page (t->pml4, upage, kpage, writable));
+}
 #else
+
+/* From here, codes will be used after project 3.
+ * If you want to implement the function for only project 2, implement it on the
+ * upper block. */
 bool
 install_page (void *upage, void *kpage, bool writable) {
 	struct thread *t = thread_current ();
@@ -663,9 +676,6 @@ install_page (void *upage, void *kpage, bool writable) {
 	return (pml4_get_page (t->pml4, upage) == NULL
 			&& pml4_set_page (t->pml4, upage, kpage, writable));
 }
-/* From here, codes will be used after project 3.
- * If you want to implement the function for only project 2, implement it on the
- * upper block. */
 
 static bool
 lazy_load_segment (struct page *page, void *aux) {
@@ -681,9 +691,11 @@ lazy_load_segment (struct page *page, void *aux) {
 	file_seek(file, ofs);
 	if (file_read(file, page->frame->kva, read_bytes) != (int)read_bytes) {
 		palloc_free_page(page->frame->kva);
-		free(aux);
+		// free(aux);
 		return false;
-	}
+	};
+	/*aux free 고려해야함 */
+	
 	memset(page->frame->kva + read_bytes, 0, zero_bytes);
 	return true;
 }

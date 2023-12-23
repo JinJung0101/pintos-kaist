@@ -5,6 +5,7 @@
 #include "threads/thread.h"
 
 typedef int tid_t;
+typedef int off_t;
 
 tid_t process_create_initd (const char *file_name);
 tid_t process_fork (const char *name, struct intr_frame *if_ UNUSED);
@@ -12,7 +13,9 @@ int process_exec (void *f_name);
 int process_wait (tid_t);
 void process_exit (void);
 void process_activate (struct thread *next);
+#ifdef VM
 bool install_page (void *upage, void *kpage, bool writable);
+#endif
 
 struct segment {
     struct file *file;
