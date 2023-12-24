@@ -341,6 +341,7 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
             struct segment *new_file_loader = malloc(sizeof(struct segment));
             memcpy(new_file_loader, aux, sizeof(struct segment));
             new_file_loader->file = file_duplicate(file_loader->file);
+			
 			if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux)) {
 				free(new_file_loader);
 				return false;
