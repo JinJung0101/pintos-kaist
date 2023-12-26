@@ -49,6 +49,7 @@ struct page {
 	/* Your implementation */
 	struct hash_elem hash_elem;
 	bool writable;
+	int mapped_page_count;
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
 	union {
@@ -66,6 +67,12 @@ struct frame {
 	void *kva;
 	struct page *page;
 	struct list_elem frame_elem;
+};
+
+struct slot {
+	struct page *page;
+	uint32_t slot_no;
+	struct list_elem swap_elem;
 };
 
 /* The function table for page operations.

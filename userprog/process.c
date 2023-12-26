@@ -26,11 +26,13 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+struct lock process_lock;
 
 /* General process initializer for initd and other process. */
 static void
 process_init (void) {
 	struct thread *current = thread_current ();
+	lock_init(&process_lock);
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -172,7 +174,6 @@ __do_fork (void *aux) {
 	if (!supplemental_page_table_copy (&current->spt, &parent->spt)){
 		goto error;
 	}
-		
 #else
 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
 		goto error;
@@ -237,8 +238,9 @@ process_exec (void *f_name) {
 	/* project 2: argument passing */
 
 	/* And then load the binary */
+	lock_acquire(&process_lock);
 	success = load (file_name, &_if);
-
+	lock_release(&process_lock);
 	/* If load failed, quit. */
 	if (!success) {
 		palloc_free_page (file_name);
@@ -400,14 +402,18 @@ struct ELF64_PHDR {
 
 static bool setup_stack (struct intr_frame *if_);
 static bool validate_segment (const struct Phdr *, struct file *);
+
+#ifndef VM
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
 		bool writable);
+#endif 
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
-extern struct lock file_lock;
+// extern struct lock file_lock;
+
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
@@ -424,16 +430,13 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
-	lock_acquire(&file_lock);
+	// lock_acquire(&file_lock);
 	file = filesys_open (file_name);
 	
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
-
-	t->running = file;
-	file_deny_write(file);
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -500,6 +503,8 @@ load (const char *file_name, struct intr_frame *if_) {
 		}
 	}
 
+	t->running = file;
+	file_deny_write(file);
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;
@@ -514,7 +519,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	lock_release(&file_lock);
+	// lock_release(&file_lock);
 	return success;
 }
 
@@ -653,6 +658,7 @@ setup_stack (struct intr_frame *if_) {
  * with palloc_get_page().
  * Returns true on success, false if UPAGE is already mapped or
  * if memory allocation fails. */
+
 static bool
 install_page (void *upage, void *kpage, bool writable) {
 	struct thread *t = thread_current ();
@@ -677,7 +683,7 @@ install_page (void *upage, void *kpage, bool writable) {
 			&& pml4_set_page (t->pml4, upage, kpage, writable));
 }
 
-static bool
+bool
 lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
@@ -686,7 +692,7 @@ lazy_load_segment (struct page *page, void *aux) {
 	struct file *file = seg->file;
 	off_t ofs = seg->ofs;
 	size_t read_bytes = seg->page_read_bytes;
-	size_t zero_bytes = PGSIZE - read_bytes;
+	size_t zero_bytes = seg->page_zero_bytes;
 
 	file_seek(file, ofs);
 	if (file_read(file, page->frame->kva, read_bytes) != (int)read_bytes) {
@@ -714,7 +720,7 @@ lazy_load_segment (struct page *page, void *aux) {
  *
  * Return true if successful, false if a memory allocation error
  * or disk read error occurs. */
-static bool
+bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
 	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
@@ -732,8 +738,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		// void *aux = NULL;
 		struct segment *seg = (struct segment *)malloc(sizeof(struct segment));
 		seg->file = file;
-		seg->page_read_bytes = page_read_bytes;
 		seg->ofs = ofs;
+		seg->page_read_bytes = page_read_bytes;
+		seg->page_zero_bytes= page_zero_bytes;
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, seg)) {
 			return false;
 		}
@@ -814,5 +821,15 @@ void stacker(char **argv, int argc, struct intr_frame *if_) {
 	// printf("fake return address at %p\n", if_->rsp-8);
 	if_->rsp -= 8;
 	*(uint64_t *)if_->rsp = 0;
+}
+
+/* project 3 */
+struct file *process_get_file(int fd) {
+	struct thread *t = thread_current();
+	struct file **fdt = t->fd_table;
+	if (fd < 2 || fd >= FDCOUNT_LIMIT) {
+		return NULL;
+	}
+	return fdt[fd];
 }
 

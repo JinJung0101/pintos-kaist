@@ -11,6 +11,7 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "vm/vm.h"
+
 #define MAX_FILE 128
 
 void syscall_entry (void);
@@ -47,6 +48,7 @@ syscall_init (void) {
 	lock_init(&file_lock);
 }
 
+/* Project2  */
 // void check_address(void *addr) {
 // 	struct thread *t = thread_current();
 // 	if (!is_user_vaddr(addr) || addr == NULL || pml4_get_page(t->pml4 , addr) == NULL) {
@@ -55,20 +57,49 @@ syscall_init (void) {
 // }
 
 /* Project3  */
-void * check_address(void * addr) {
-	if (!is_user_vaddr(addr) || addr == NULL) {
+// void * check_address(void * addr) {
+// 	if (!is_user_vaddr(addr) || addr == NULL) {
+// 		exit(-1);
+// 	}
+// }
+
+struct page *check_address(void *addr) {
+	if (is_kernel_vaddr(addr) || addr == NULL)
 		exit(-1);
-	}
-	// struct page *page = spt_find_page(&thread_current()->spt, addr);
-	// if (page == NULL) {
-	// 	exit(-1);
-	// }
+
+	return spt_find_page(&thread_current()->spt, addr);
+}
+
+void validate_buffer(void *buffer, size_t size, bool to_write) {
+
+    if (buffer == NULL)
+        exit(-1);
+
+    if (buffer <= USER_STACK && buffer >= thread_current()->rsp_stack)
+        return;
+
+    void *start_addr = pg_round_down(buffer);
+    void *end_addr = pg_round_down(buffer + size);
+
+    ASSERT(start_addr <= end_addr);
+    for (void *addr = end_addr; addr >= start_addr; addr -= PGSIZE) {
+        // printf("addr: %p\n", addr);
+        struct page *pg = check_address(addr);
+        if (pg == NULL) {
+            exit(-1);
+        }
+        
+        if (pg->writable == false && to_write == true) {
+            exit(-1);
+        }
+    }
 }
 
 int add_file_to_fd_table (struct file *file) {
 	struct thread *t = thread_current();
 	struct file **fdt = t->fd_table;
 	int fd = t->fd_idx;
+	
 	while (t->fd_table[fd] != NULL) {
 		if (fd >= FDCOUNT_LIMIT) {
 			t->fd_idx = FDCOUNT_LIMIT;
@@ -76,6 +107,7 @@ int add_file_to_fd_table (struct file *file) {
 		}
 		fd++;
 	}
+
 	t->fd_idx = fd;
 	fdt[fd] = file;
 	return fd;
@@ -100,7 +132,6 @@ void exit (int status) {
 }
 
 tid_t fork (const char *thread_name, struct intr_frame *f) {
-	// check_address(thread_name);
 	return process_fork(thread_name, f);
 }
 
@@ -116,8 +147,11 @@ int wait (tid_t tid) {
 }
 
 bool create (const char *file, unsigned initial_size) {
+	lock_acquire(&file_lock);
 	check_address(file);
-	return filesys_create(file, initial_size);
+	bool success = filesys_create(file, initial_size);
+	lock_release(&file_lock);
+	return success;
 }
 
 bool remove (const char *file) {
@@ -130,6 +164,7 @@ int open (const char *file) {
 	lock_acquire(&file_lock);
 	struct file *file_info = filesys_open(file);
 	lock_release(&file_lock);
+
 	if (file_info == NULL) {
 		return -1;
 	}
@@ -145,7 +180,8 @@ int filesize (int fd) {
 }
 
 int read (int fd, void *buffer, unsigned length) {
-	check_address(buffer);
+	// check_address(buffer);
+	validate_buffer(buffer, length, true);
 	int bytesRead = 0;
 	if (fd == 0) { 
 		for (int i = 0; i < length; i++) {
@@ -174,7 +210,8 @@ int read (int fd, void *buffer, unsigned length) {
 }
 
 int write (int fd, const void *buffer, unsigned length) {
-	check_address(buffer);
+	// check_address(buffer);
+	validate_buffer(buffer, length, false);
 	int bytesRead = 0;
 
 	if (fd == 0) {
@@ -225,12 +262,41 @@ void close (int fd) {
 	fdt[fd] = NULL;
 }
 
+void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
+{
+    if (!addr || addr != pg_round_down(addr))
+        return NULL;
+
+    if (offset != pg_round_down(offset))
+        return NULL;
+
+    if (!is_user_vaddr(addr) || !is_user_vaddr(addr + length))
+        return NULL;
+
+    if (spt_find_page(&thread_current()->spt, addr))
+        return NULL;
+
+    struct file *f = process_get_file(fd);
+
+    if (f == NULL)
+        return NULL;
+
+    if (file_length(f) == 0 || (int)length <= 0)
+        return NULL;
+
+    return do_mmap(addr, length, writable, f, offset); 
+}
+
+void munmap(void *addr) {
+	do_munmap(addr);
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f) {
-#ifdef VM
-	thread_current()->rsp_stack = f->rsp;
-#endif
+	#ifdef VM
+		thread_current()->rsp_stack = f->rsp;
+	#endif
 	switch (f->R.rax) {
 		case SYS_HALT:
 			halt();
@@ -275,6 +341,12 @@ syscall_handler (struct intr_frame *f) {
 			break;
 		case SYS_CLOSE:
 			close(f->R.rdi);
+			break;
+		case SYS_MMAP:
+			f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+			break;
+		case SYS_MUNMAP:
+			munmap(f->R.rdi);
 			break;
 		default:
 			exit(-1);
