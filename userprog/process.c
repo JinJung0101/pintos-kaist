@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -26,13 +27,12 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
-struct lock process_lock;
+
 
 /* General process initializer for initd and other process. */
 static void
 process_init (void) {
 	struct thread *current = thread_current ();
-	lock_init(&process_lock);
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -96,6 +96,7 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 
 	if (child->exit_status == TID_ERROR) {
 		sema_up(&child->exit_sema);
+		printf("process ~ \n");
 		return TID_ERROR;
 	}
 	return tid;
@@ -238,9 +239,9 @@ process_exec (void *f_name) {
 	/* project 2: argument passing */
 
 	/* And then load the binary */
-	lock_acquire(&process_lock);
+	lock_acquire(&file_lock);
 	success = load (file_name, &_if);
-	lock_release(&process_lock);
+	lock_release(&file_lock);
 	/* If load failed, quit. */
 	if (!success) {
 		palloc_free_page (file_name);
@@ -301,7 +302,7 @@ process_exit (void) {
 	}
 	
 	palloc_free_multiple(curr->fd_table, FDT_PAGES);
-
+	
 	file_close(curr->running);
 
 	process_cleanup ();
@@ -430,7 +431,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
-	// lock_acquire(&file_lock);
 	file = filesys_open (file_name);
 	
 	if (file == NULL) {
@@ -505,6 +505,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	t->running = file;
 	file_deny_write(file);
+
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;
@@ -763,11 +764,18 @@ setup_stack (struct intr_frame *if_) {
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
-	if (vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true)) {
+	// if (vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true)) {
+	// 	success = vm_claim_page(stack_bottom);
+	// 	if (success) {
+	// 		if_->rsp = USER_STACK;
+	// 		thread_current()->stack_bottom = stack_bottom;
+	// 	}
+	// }
+	// return success;
+	if (vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, 1)) {
 		success = vm_claim_page(stack_bottom);
 		if (success) {
 			if_->rsp = USER_STACK;
-			thread_current()->stack_bottom = stack_bottom;
 		}
 	}
 	return success;

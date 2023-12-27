@@ -18,7 +18,26 @@ void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
 struct file *get_file_from_fd_table (int fd);
-struct lock file_lock;
+
+void halt(void);
+void exit (int status);
+tid_t fork (const char *thread_name, struct intr_frame *f);
+int exec (const char *file);
+int wait (tid_t tid);
+bool create (const char *file, unsigned initial_size);
+bool remove (const char *file);
+int open (const char *file);
+int filesize (int fd);
+int read (int fd, void *buffer, unsigned length);
+int write (int fd, const void *buffer, unsigned length);
+void seek (int fd, unsigned position);
+unsigned tell (int fd);
+void close (int fd);
+
+/* project 3 */
+void *mmap(void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap(void *addr);
+
 
 /* System call.
  *
@@ -155,8 +174,11 @@ bool create (const char *file, unsigned initial_size) {
 }
 
 bool remove (const char *file) {
+	lock_acquire(&file_lock);
 	check_address(file);
-	return filesys_remove(file);
+	bool success = filesys_remove(file);
+	lock_release(&file_lock);
+	return success;
 }
 
 int open (const char *file) {
@@ -179,34 +201,29 @@ int filesize (int fd) {
 	return file_length(get_file_from_fd_table(fd));
 }
 
-int read (int fd, void *buffer, unsigned length) {
-	// check_address(buffer);
-	validate_buffer(buffer, length, true);
-	int bytesRead = 0;
-	if (fd == 0) { 
-		for (int i = 0; i < length; i++) {
-			char c = input_getc();
-			((char *)buffer)[i] = c;
-			bytesRead++;
+int read(int fd, void *buffer, unsigned length) {
+    validate_buffer(buffer, length, true);
+    int bytesRead = 0;
+    if (fd == 0) {
+        for (int i = 0; i < length; i++) {
+            char c = input_getc();
+            ((char *)buffer)[i] = c;
+            bytesRead++;
 
-			if (c == '\n') {
-				break;
-			}
-		}
-	} 
-	else if (fd == 1) {
-		return -1;
-	} 
-	else {
-		struct file *f = get_file_from_fd_table(fd);
-		if (f == NULL) {
-			return -1; 
-		}
-		lock_acquire(&file_lock);
-		bytesRead = file_read(f, buffer, length);
-		lock_release(&file_lock);
-	}
-	return bytesRead;
+            if (c == '\n') break;
+        }
+    } else if (fd == 1) {
+        return -1;
+    } else {
+        struct file *f = get_file_from_fd_table(fd);
+        if (f == NULL) {
+            return -1;
+        }
+        lock_acquire(&file_lock);
+        bytesRead = file_read(f, buffer, length);
+        lock_release(&file_lock);
+    }
+    return bytesRead;
 }
 
 int write (int fd, const void *buffer, unsigned length) {
@@ -305,7 +322,9 @@ syscall_handler (struct intr_frame *f) {
 			exit(f->R.rdi);
 			break;
 		case SYS_FORK:
+			lock_acquire(&file_lock);
 			f->R.rax = fork(f->R.rdi, f);
+			lock_release(&file_lock);
 			break;
 		case SYS_EXEC:
 			if (exec(f->R.rdi) < 0) {

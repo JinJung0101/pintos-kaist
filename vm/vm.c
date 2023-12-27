@@ -213,9 +213,10 @@ vm_get_frame (void) {
 /* Growing the stack. */
 static void
 vm_stack_growth (void *addr UNUSED) {
-	if (vm_alloc_page(VM_ANON|VM_MARKER_0, addr, 1)) {
-		thread_current()->stack_bottom -= PGSIZE;
-	}
+	// if (vm_alloc_page(VM_ANON|VM_MARKER_0, addr, 1)) {
+	// 	thread_current()->stack_bottom -= PGSIZE;
+	// }
+	vm_alloc_page(VM_ANON | VM_MARKER_0, pg_round_down(addr), true);
 }
 
 /* Handle the fault on write_protected page */
@@ -231,34 +232,32 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	if (is_kernel_vaddr(addr) || addr == NULL) {
+	if (is_kernel_vaddr(addr) || addr == NULL || !not_present) {
 		return false;
 	}
+	// if ((USER_STACK - (1 << 20) <= rsp - 8 && rsp - 8 == addr && addr <= USER_STACK) || (USER_STACK - (1 << 20) <= rsp && rsp <= addr && addr <= USER_STACK)) {
+	
 
-	if (not_present) {
-		struct thread *cur = thread_current();
-		void *rsp = f->rsp; // user access인 경우 rsp는 유저 stack을 가리킨다.
-		if (!user) {			// kernel access인 경우 thread에서 rsp를 가져와야 한다.
-			rsp = thread_current()->rsp_stack;
-		}
-		if (rsp-8 <= addr && USER_STACK-(1 << 20) <= addr && addr <= USER_STACK) {
-			vm_stack_growth(pg_round_down(addr));
-		}
-		// if ((USER_STACK - (1 << 20) <= rsp - 8 && rsp - 8 == addr && addr <= USER_STACK) || (USER_STACK - (1 << 20) <= rsp && rsp <= addr && addr <= USER_STACK)) {
-		// 	vm_stack_growth(pg_round_down(addr));
-		// }
-
-		page = spt_find_page(spt, addr);
-
-		if (page == NULL) {
-			return false;
-		}
-		if (write && !page->writable) {
-			return false;
-		}
-		return vm_do_claim_page(page);
+	void *rsp = f->rsp;
+	if(!user) {
+		rsp = thread_current()->rsp_stack;
 	}
-	return false;
+	//USER_STACK - (1 << 20) = 스택 최대 크기 = 1MB
+	//x86-64 PUSH 명령어는 스택 포인터를 조정하기 전에 액세스 권한을 확인하므로 스택 포인터 아래 8바이트의 페이지 장애가 발생할 수 있다.
+	if ((USER_STACK - (1 << 20) <= rsp - 8 && rsp - 8 <= addr && addr <= USER_STACK)) {
+		vm_stack_growth(addr);
+	}
+	page = spt_find_page(spt, addr);
+	if(page == NULL) {
+		return false;
+	}
+	if (write && (!page->writable)) { 
+		return false;
+	}
+	if (!vm_do_claim_page(page)) {
+		return false;
+	}
+	return true;
 }
 
 /* Free the page.
@@ -274,7 +273,6 @@ bool
 vm_claim_page (void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function */
-
 	page = spt_find_page(&thread_current()->spt, va);
 	if (page == NULL) {
 		return false;
@@ -300,6 +298,7 @@ vm_do_claim_page (struct page *page) {
 		return false;
 	}
 }
+
 
 /* Returns a hash value for page p. */
 unsigned 
@@ -394,10 +393,11 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 	while (hash_next(&i)) {
 		struct page *parent_page = hash_entry (hash_cur (&i), struct page, hash_elem);
 		enum vm_type type = page_get_type(parent_page);
+		enum vm_type now_type = parent_page->operations->type;
 		void *upage = parent_page->va;
 		bool writable = parent_page->writable;
 
-		if (parent_page->operations->type == VM_UNINIT) {
+		if (now_type == VM_UNINIT) {
 			vm_initializer *init = parent_page->uninit.init;
 			void *aux = parent_page->uninit.aux;
 			struct segment *file_loader = (struct segment *)aux;
@@ -405,7 +405,7 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
             memcpy(new_file_loader, aux, sizeof(struct segment));
             new_file_loader->file = file_duplicate(file_loader->file);
 			
-			if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux)) {
+			if (!vm_alloc_page_with_initializer(type, upage, writable, init, new_file_loader)) {
 				free(new_file_loader);
 				return false;
 			}
@@ -414,9 +414,8 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 				free(new_file_loader);
 				return false;
 			}
-			free(new_file_loader);
 		}
-		else if (parent_page->operations->type == VM_FILE) {
+		else if (now_type == VM_FILE) {
 			struct segment *file_aux = malloc(sizeof(struct segment));
 			file_aux->file = parent_page->file.file;
 			file_aux->ofs = parent_page->file.ofs;
@@ -426,13 +425,12 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 				free(file_aux);
 				return false;
 			}
-			free(file_aux);
-
+	
 			struct page *file_page = spt_find_page(dst, upage);
 			file_backed_initializer(file_page, type, NULL);
 			file_page->frame = parent_page->frame;
 			pml4_set_page(thread_current()->pml4, file_page->va, parent_page->frame->kva, parent_page->writable);
-			continue;
+			// continue;
 		}
 		else {
 			if (!vm_alloc_page(type, upage, writable)) {
@@ -442,11 +440,15 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 				return false;
 			}
 			struct page *child_page = spt_find_page(dst, upage);
+			if (child_page ==  NULL) {
+				return false;
+			}
 			memcpy(child_page->frame->kva, parent_page->frame->kva, PGSIZE);
 		}
 	}
 	return true;
 }
+
 
 /* Free the resource hold by the supplemental page table */
 void
