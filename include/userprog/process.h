@@ -3,6 +3,7 @@
 #define MAX_ARGS 128
 
 #include "threads/thread.h"
+#include "syscall.h"
 
 typedef int tid_t;
 typedef int off_t;

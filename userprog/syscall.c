@@ -132,6 +132,7 @@ void exit (int status) {
 }
 
 tid_t fork (const char *thread_name, struct intr_frame *f) {
+	check_address(thread_name);
 	return process_fork(thread_name, f);
 }
 
@@ -147,8 +148,8 @@ int wait (tid_t tid) {
 }
 
 bool create (const char *file, unsigned initial_size) {
-	lock_acquire(&file_lock);
 	check_address(file);
+	lock_acquire(&file_lock);
 	bool success = filesys_create(file, initial_size);
 	lock_release(&file_lock);
 	return success;

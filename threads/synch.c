@@ -206,23 +206,26 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
-   struct thread *cur = thread_current();
+   if(!thread_mlfqs) {
+      if (lock->holder != NULL) {
+      //현재 thread의 wait_on_lock 변수에 획득하기를 기다리는 lock의 주소를 저장
+      thread_current()->waiting_lock = lock;
 
-   if (lock->holder != NULL) {
-      // put signal that this thread is waiting for the lock
-      cur->waiting_lock = lock;
-      list_insert_ordered(&lock->holder->donations, &cur->donations_elem, donations_priority_more, NULL);
-      // nested donation of priority
-      if (!thread_mlfqs) {
-         donate_priority();
+      //multiple donation을 고려하기위해 이전상태의 우선순위를 기억
+      //donation을 받은 thread의 thread 구조체를 list로 관리
+      list_push_back(&lock->holder->donations, &thread_current()->donations_elem);
+      //priority donation을 수행하기 위해 donate_priority()함수를 호출
+      donate_priority();
       }
    }
-
    sema_down (&lock->semaphore);
-   cur->waiting_lock = NULL;
-
-   lock->holder = thread_current();
+   if(!thread_mlfqs) {
+      thread_current()->waiting_lock = NULL;
+   }
+   //lock을 획득한 후 lock holder를 갱신한다.
+   lock->holder = thread_current ();
 }
+
 
 /* Tries to acquires LOCK and returns true if successful or false
    on failure.  The lock must not already be held by the current

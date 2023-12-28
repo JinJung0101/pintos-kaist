@@ -6,7 +6,7 @@
 #include <syscall.h>
 #include "tests/lib.h"
 #include "tests/main.h"
-
+#include <stdio.h>
 const char *test_name = "child-sort";
 
 unsigned char buf[128 * 1024];
@@ -21,9 +21,7 @@ main (int argc UNUSED, char *argv[])
   size_t i;
 
   quiet = true;
-
   CHECK ((handle = open (argv[1])) > 1, "open \"%s\"", argv[1]);
-
   size = read (handle, buf, sizeof buf);
   for (i = 0; i < size; i++)
     histogram[buf[i]]++;

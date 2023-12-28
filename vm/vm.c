@@ -160,6 +160,7 @@ vm_get_victim (void) {
 			pml4_set_accessed(curr->pml4, victim->page->va, false);
 		}
 		else {
+			clock_ref = start;
 			lock_release(&frame_table_lock);
 			return victim;
 		}
@@ -214,6 +215,7 @@ vm_get_frame (void) {
 static void
 vm_stack_growth (void *addr UNUSED) {
 	if (vm_alloc_page(VM_ANON|VM_MARKER_0, addr, 1)) {
+		vm_claim_page(addr);
 		thread_current()->stack_bottom -= PGSIZE;
 	}
 }
@@ -242,7 +244,9 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 			rsp = thread_current()->rsp_stack;
 		}
 		if (rsp-8 <= addr && USER_STACK-(1 << 20) <= addr && addr <= USER_STACK) {
-			vm_stack_growth(pg_round_down(addr));
+			//vm_stack_growth(pg_round_down(addr));
+			vm_stack_growth(thread_current()->stack_bottom - PGSIZE);
+			return true;
 		}
 		// if ((USER_STACK - (1 << 20) <= rsp - 8 && rsp - 8 == addr && addr <= USER_STACK) || (USER_STACK - (1 << 20) <= rsp && rsp <= addr && addr <= USER_STACK)) {
 		// 	vm_stack_growth(pg_round_down(addr));
@@ -405,7 +409,7 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
             memcpy(new_file_loader, aux, sizeof(struct segment));
             new_file_loader->file = file_duplicate(file_loader->file);
 			
-			if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux)) {
+			if (!vm_alloc_page_with_initializer(type, upage, writable, init, new_file_loader)) {
 				free(new_file_loader);
 				return false;
 			}
@@ -414,7 +418,6 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 				free(new_file_loader);
 				return false;
 			}
-			free(new_file_loader);
 		}
 		else if (parent_page->operations->type == VM_FILE) {
 			struct segment *file_aux = malloc(sizeof(struct segment));
@@ -435,14 +438,35 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 			continue;
 		}
 		else {
-			if (!vm_alloc_page(type, upage, writable)) {
-				return false;
+			// if (!vm_alloc_page(type, upage, writable)) {
+			// 	return false;
+			// }
+			// if (!vm_claim_page(upage)) {
+			// 	return false;
+			// }
+			struct page *child_page = (struct page *)malloc(sizeof(struct page));
+			memcpy(child_page,parent_page,sizeof(struct page));
+			if(child_page->anon.slot_no == -1){
+				child_page->frame = vm_get_frame();
+				child_page->frame->page = child_page;
+				memcpy(child_page->frame->kva, parent_page->frame->kva, PGSIZE);
+				pml4_set_page(thread_current()->pml4,child_page->va,child_page->frame->kva,child_page->writable);
 			}
-			if (!vm_claim_page(upage)) {
-				return false;
+			else{
+				struct list_elem *e;
+				struct slot *slot;
+				for (e = list_begin(&swap_table); e != list_end(&swap_table); e = list_next(e)) {
+					slot = list_entry(e, struct slot, swap_elem);
+					if (slot->slot_no == parent_page->anon.slot_no) {
+						slot->dup_cnt++;
+						break;
+					}
+				}
 			}
-			struct page *child_page = spt_find_page(dst, upage);
-			memcpy(child_page->frame->kva, parent_page->frame->kva, PGSIZE);
+			spt_insert_page(dst,child_page);
+			
+			// struct page *child_page = spt_find_page(dst, upage);
+			
 		}
 	}
 	return true;
@@ -455,4 +479,3 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	 * TODO: writeback all the modified contents to the storage. */
 	hash_clear(&spt->spt_hash, page_kill);
 }
-
