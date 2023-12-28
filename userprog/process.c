@@ -18,9 +18,6 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
-
-#include "hash.h"
-
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -97,8 +94,7 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	sema_down(&child->fork_sema);
 
 	if (child->exit_status == TID_ERROR) {
-		// sema_up(&child->exit_sema);
-		// printf("process ~ \n");
+		sema_up(&child->exit_sema);
 		return TID_ERROR;
 	}
 	return tid;
@@ -783,7 +779,6 @@ setup_stack (struct intr_frame *if_) {
 		success = vm_claim_page(stack_bottom);
 		if (success) {
 			if_->rsp = USER_STACK;
-			thread_current()->stack_bottom = stack_bottom;
 		}
 	}
 	return success;

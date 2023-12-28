@@ -70,6 +70,7 @@ file_backed_destroy (struct page *page) {
 		pml4_set_dirty(thread_current()->pml4, page->va, 0);
 	}
 	pml4_clear_page(thread_current()->pml4, page->va);
+	list_remove(&page->frame->frame_elem);
 }
 
 /* Do the mmap */

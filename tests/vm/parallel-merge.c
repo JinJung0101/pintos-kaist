@@ -59,9 +59,12 @@ sort_chunks (const char *subprocess, int exit_status)
 
       /* Sort with subprocess. */
       snprintf (cmd, sizeof cmd, "%s %s", subprocess, fn);
+      printf("%d,before 1\n", i);
       children[i] = fork (subprocess);
+      printf("%d,before 2\n", i);
       if (children[i] == 0)
         CHECK ((children[i] = exec (cmd)) != -1, "exec \"%s\"", cmd);
+      printf("%d,before 3\n", i);
       quiet = false;
     }
 
@@ -69,9 +72,9 @@ sort_chunks (const char *subprocess, int exit_status)
     {
       char fn[128];
       int handle;
-
+      printf("%d,before 4\n", i);
       CHECK (wait (children[i]) == exit_status, "wait for child %zu", i);
-
+      printf("%d,before 5\n", i);
       /* Read chunk back from file. */
       quiet = true;
       snprintf (fn, sizeof fn, "buf%zu", i);
